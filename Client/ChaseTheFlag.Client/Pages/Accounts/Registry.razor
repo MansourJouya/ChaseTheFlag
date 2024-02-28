@@ -1,0 +1,209 @@
+﻿@*
+    This component represents the registration page ("/Registry").
+    It allows users to sign up for Chase The Flag.
+    Users can input their first name, last name, username, password, and choose a color.
+    Upon successful registration, users are redirected to the home page.
+    If the user is already authenticated, they are automatically redirected to the home page.
+*@
+
+@page "/Registry"
+
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavigationManager
+@inject RequestHandler RequestHandler
+@inject AuthenticationService AuthService
+@inject ISnackbar Snackbar
+
+@if (!IsRegistrationComplete)
+{
+    <!-- Registration Form -->
+    <EditForm Model="@registeredUserData" OnValidSubmit="RegisterUser">
+        <DataAnnotationsValidator />
+
+        <MudGrid>
+            <MudItem xs="12" md="4" />
+            <MudItem xs="12" md="4">
+                <!-- Registration Card -->
+                <MudCard Elevation="15" Style="position:relative;" Class="py-8 px-4 rounded-lg">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <!-- Logo and Title -->
+                            <div style="display: flex; justify-content: center; align-items: center;">
+                                <MudCardMedia Class="ml-10" Image="images/game.png" Style="width:150px; height:150px;" />
+                            </div>
+                            <MudText Align="Align.Center" Class="mt-2 ml-10" Typo="Typo.h6">Register Chase The Flag</MudText>
+                        </CardHeaderContent>
+                        <!-- Close Button -->
+                        <CardHeaderActions>
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="RedirectToLogin" Color="Color.Default" />
+                        </CardHeaderActions>
+                    </MudCardHeader>
+
+                    <MudCardContent>
+                        <!-- First Name , Last Name, Username, Password, Color fields omitted for brevity -->
+
+
+
+                        <MudTextField T="string" Label="First Name" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="registeredUserData.FirstName"
+                                      For="@(() => registeredUserData.FirstName)"
+                                      MaxLength="100" Counter="100" Immediate Clearable Required
+                                      HelperText="Example: John, Jane" />
+
+                        <MudTextField T="string" Label="Last Name" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="registeredUserData.LastName"
+                                      For="@(() => registeredUserData.LastName)"
+                                      MaxLength="100" Counter="100" Immediate Clearable Required
+                                      HelperText="Example: Smith, Johnson" />
+
+                        <MudTextField T="string" Label="Username" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="registeredUserData.Username"
+                                      For="@(() => registeredUserData.Username)"
+                                      MaxLength="50" Counter="50" Immediate Clearable Required
+                                      HelperText="Example: Flag" />
+                        <MudTextField T="string" Label="Password" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="registeredUserData.Password"
+                                      For="@(() => registeredUserData.Password)"
+                                      InputType="@PasswordInputType"
+                                      Adornment="Adornment.End" AdornmentIcon="@PasswordInputIcon" OnAdornmentClick="TogglePasswordVisibility"
+                                      MaxLength="50" Counter="50" Immediate Clearable Required
+                                      HelperText="Example: Flag@123" />
+
+                        <MudColorPicker Label="Color" Margin="Margin.Dense" Class="mt-4"
+                                        @bind-Text="registeredUserData.Color"
+                                        Clearable
+                                        Style="@($"color: {registeredUserData.Color};")" />
+
+
+                    </MudCardContent>
+
+                    <MudCardActions>
+                        <!-- Submit Button -->
+                        <MudButton ButtonType="ButtonType.Submit"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Class="ml-auto">
+                            Registry
+                        </MudButton>
+                    </MudCardActions>
+
+                    <!-- Loading Overlay -->
+                    <ShowingOverlay IsShowingOverlay="@IsLoading" ColorProgressLinear="Color.Info" Text="Please wait while we review your information." />
+                </MudCard>
+            </MudItem>
+            <MudItem xs="12" md="4" />
+        </MudGrid>
+    </EditForm>
+}
+
+@code {
+
+    private MudTextField<string>? refPassword;                                      // Reference to a MudTextField component for password input
+    Random random = new Random();                                                   // Initializing a Random object for generating random numbers
+    bool IsRegistrationComplete = false;                                            // Indicates whether the registration process is complete
+    RegisteredUserData registeredUserData = new RegisteredUserData();               // UserRegistry model for registration form
+    bool IsLoading = false;                                                         // Indicates whether the form is currently loading
+    bool ShowPassword = false;                                                      // Indicates whether to show the password
+    private InputType PasswordInputType = InputType.Password;                       // Password input type (text or password)
+    private string PasswordInputIcon = Icons.Material.Filled.VisibilityOff;         // Password visibility icon
+    UserDataLocal? userDataLocal;                                                   // User account
+
+    // Method called after the component has been rendered
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await CheckAuthentication();
+        }
+    }
+
+    // Method to check if the user is already authenticated
+    private async Task CheckAuthentication()
+    {
+        try
+        {
+            var result = await AuthService.RetrieveUserAccountAsync();
+            if (result.Status != ResultStatus.Success)
+            {
+                registeredUserData.Color = $"#{random.Next(0, 256):X2}{random.Next(0, 256):X2}{random.Next(0, 256):X2}";
+                IsRegistrationComplete = false;
+                StateHasChanged();
+                return;
+            }
+
+            userDataLocal = result.Value!;
+            if (userDataLocal.IsAuthenticated)
+                NavigateToHomePage();
+        }
+        catch
+        {
+            IsRegistrationComplete = false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    // Method to navigate to the home page
+    private void NavigateToHomePage()
+    {
+        NavigationManager.NavigateTo("Home", forceLoad: true);
+    }
+
+    // Method to redirect to the login page
+    private void RedirectToLogin()
+    {
+        NavigationManager.NavigateTo("/");
+    }
+
+    // Method to handle registration form submission
+    private async Task RegisterUser()
+    {
+        try
+        {
+            IsLoading = true;
+            StateHasChanged();
+
+            string apiUrl = ApiEndpoints.GetApiBaseUrl() + "RegisteredUsers/registry";
+
+            var result = await RequestHandler.SendHttpRequestRegistryAsync<RegisteredUserData, RegisteredUserData>(HttpMethod.Post, apiUrl, registeredUserData);
+            if (result.Status == ResultStatus.Success)
+            {
+                ShowMessage($"{registeredUserData.FirstName} registration successful.", Severity.Success);
+
+                NavigateToHomePage();
+            }
+            else
+            {
+                ShowMessage(result.ErrorMessage, Severity.Error);
+            }
+        }
+        catch
+        {
+            ShowMessage("Error occurred. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // Method to display a snackbar message
+    private void ShowMessage(string message, Severity severity = Severity.Warning)
+    {
+        Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+        Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+        Snackbar.Add(message, severity);
+    }
+
+    // Method to toggle password visibility
+    private void TogglePasswordVisibility()
+    {
+        ShowPassword = !ShowPassword;
+        PasswordInputIcon = ShowPassword ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff;
+        PasswordInputType = ShowPassword ? InputType.Text : InputType.Password;
+    }
+}

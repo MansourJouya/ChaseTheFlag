@@ -1,0 +1,34 @@
+﻿@inherits ComponentBase
+@inject ISnackbar Snackbar
+
+
+<MudOverlay Visible="@IsShowingOverlay" LightBackground="@LightBackground" DarkBackground="@DarkBackground" Absolute="true">
+    <MudAlert Severity="Severity.Normal" Variant="Variant.Filled" NoIcon="true" Class="my-2">
+        @Text
+        <MudProgressLinear Color="@ColorProgressLinear" Indeterminate="true" Class="my-1" />
+    </MudAlert>
+</MudOverlay>
+
+@code {
+
+    [Parameter]
+    public bool IsShowingOverlay { get; set; } = false;                 // Indicates whether to show the overlay
+
+    [Parameter]
+    public string Text { get; set; } = string.Empty;                    // Text to display
+
+    [Parameter]
+    public Color ColorProgressLinear { get; set; } = Color.Success;      // Color of the progress linear
+
+    [Parameter]
+    public bool LightBackground { get; set; } = false;                   // Indicates whether to use a light background
+
+    [Parameter]
+    public bool DarkBackground { get; set; } = true;                     // Indicates whether to use a dark background
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        // Initialization logic can be added here if needed
+    }
+}

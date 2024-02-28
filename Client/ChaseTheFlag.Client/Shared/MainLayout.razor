@@ -1,0 +1,201 @@
+﻿@inherits LayoutComponentBase
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject SnackbarManager SnackbarManager
+
+
+<MudThemeProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<AuthorizeView>
+    <Authorized>
+        <MudLayout>
+            <MudAppBar Elevation="0">
+                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => ToggleLeftDrawer())" />
+                @if (_currentUser != null)
+                {
+                    <UserMenu CurrentUser="@_currentUser" OnlineUserCount="@_onlineUserCount" IsConnected="@IsConnected" />
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.Chat" Color="Color.Inherit" Edge="Edge.End" OnClick="@((e) => ToggleRightDrawer())" />
+            </MudAppBar>
+            <MudDrawer ClipMode="DrawerClipMode.Always" @bind-Open="_isRightDrawerOpen" Anchor="Anchor.End" Elevation="1">
+                <PublicChat Sender="_currentUser" LocalUserData="_currentUserData" />
+            </MudDrawer>
+            <MudDrawer ClipMode="DrawerClipMode.Always" @bind-Open="_isLeftDrawerOpen" Elevation="1">
+                @if (_currentUser != null)
+                {
+                    <ManageGroup CurrentUser="_currentUser" PlayerTag="@_currentUser.PlayerTag" UserAccount="_currentUserData" />
+                }
+            </MudDrawer>
+            <MudMainContent>
+                <MudContainer MaxWidth="MaxWidth.Large" Class="my-16 pt-16">
+                    @Body
+                </MudContainer>
+            </MudMainContent>
+        </MudLayout>
+    </Authorized>
+    <NotAuthorized>
+        <MudLayout>
+            <MudContainer MaxWidth="MaxWidth.Large" Class="my-2 pt-5">
+                @Body
+            </MudContainer>
+        </MudLayout>
+
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+
+    #region Local Variables
+    private int _onlineUserCount = 0;                               // Represents the count of online users.
+    private HubConnection? _hubConnection;                          // Represents the connection to the SignalR hub.
+    private UserDataLocal _currentUserData = new UserDataLocal();   // Represents the current user's data.
+    private RegisteredUser _currentUser = new RegisteredUser();     // Represents the currently registered user.
+    private bool _isLeftDrawerOpen = true;                          // Represents the state of the left drawer (open or closed).
+    private bool _isRightDrawerOpen = true;                         // Represents the state of the right drawer (open or closed).
+    private bool _isConnected;                                      // Indicates whether the application is connected to the SignalR hub.
+    public bool IsConnected                                         // Gets or sets the connection status to the SignalR hub.
+    {
+        get { return _isConnected; }
+        private set
+        {
+            if (_isConnected != value)
+            {
+                _isConnected = value;
+                if (_isConnected)
+                    _ =  HubDataSender.SendDataToHub(_hubConnection!, RequestHandler, _currentUserData, _currentUser.PlayerTag);
+
+            }
+        }
+    }
+    #endregion
+
+
+
+    // Initializes the component asynchronously.
+    protected override async Task OnInitializedAsync()
+    {
+        // Establishing connection with the SignalR hub
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(ApiEndpoints.SignalRHubUrl())
+            .Build();
+
+        // Handling 'UpdateUserConnection' event to update the online user count
+        _hubConnection.On<byte[]>("UpdateUserConnection", (count) =>
+        {
+            if (count[0] != 0x00 && count[1] != 0x01)  // Messeage Syetem 01x
+                return;
+            _onlineUserCount = count[2];
+            StateHasChanged();
+        });
+
+        // Handling 'UpdateUserStatusResualt' event to update user status result
+        _hubConnection.On<byte>("UpdateUserStatusResualt", async (tag) =>
+        {
+            if (Convert.ToChar(tag).ToString() == _currentUser.PlayerTag)
+            {
+                // Loading user data when user status is updated
+                await LoadUserDataAsync();
+                StateHasChanged();
+            }
+        });
+
+        // Handling 'ReceiveMessagePrivate' event to display private messages
+        _hubConnection.On<ChatPrivate>("ReceiveMessagePrivate", (message) =>
+        {
+            if (message.UserIdReceive == _currentUser.Id)
+            {
+                // Displaying a Snackbar notification for new private messages
+                SnackbarManager.Show($"New message from {message.SenderName}: {message.Message}", Severity.Info);
+                StateHasChanged();
+            }
+        });
+
+        // Starting the connection with the SignalR hub
+        await _hubConnection.StartAsync();
+
+        // Updating the connection status
+        IsConnected = _hubConnection?.State == HubConnectionState.Connected;
+    }
+
+    // Executes logic after the component has been rendered.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Check if it's the first render
+        if (firstRender)
+        {
+            try
+            {
+                // Attempt to fetch user account data
+                var result = await AuthService.RetrieveUserAccountAsync();
+
+                // Check if the user account data retrieval was successful
+                if (result.Status != ResultStatus.Success)
+                {
+                    // Update the UI if retrieval failed
+                    StateHasChanged();
+                    return;
+                }
+
+                // Update the current user data with the fetched value
+                _currentUserData = result.Value!;
+
+                // Load additional user data
+                await LoadUserDataAsync();
+            }
+            catch (Exception ex)
+            {
+                // Log any exceptions that occur during data retrieval or processing
+                Console.WriteLine($"An error occurred: {ex.Message}");
+            }
+            finally
+            {
+                // Ensure the UI is updated after data retrieval or any error handling
+                StateHasChanged();
+            }
+        }
+    }
+
+    // Loads user data asynchronously.
+    private async Task LoadUserDataAsync()
+    {
+        // Construct the API URL for fetching user data
+        string apiUrl = $"{ApiEndpoints.GetApiBaseUrl()}RegisteredUsers/{_currentUserData.Id}";
+
+        try
+        {
+            // Send HTTP GET request to fetch user data
+            var userResult = await RequestHandler.SendHttpRequestAsync<RegisteredUser, RegisteredUser>(HttpMethod.Get, apiUrl, _currentUserData);
+
+            // Check if the request was successful
+            if (userResult.Status == ResultStatus.Success)
+            {
+                // Update the current user with the fetched data
+                _currentUser = userResult.Value;
+            }
+            else
+            {
+                // Handle unsuccessful response from the server
+                Console.WriteLine("Failed to fetch user data.");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Handle any exceptions that occur during the operation
+            Console.WriteLine($"Error loading user data: {ex.Message}");
+        }
+    }
+
+    // Toggles the state of the left drawer
+    private void ToggleLeftDrawer()
+    {
+        _isLeftDrawerOpen = !_isLeftDrawerOpen;
+    }
+
+    // Toggles the state of the right drawer
+    private void ToggleRightDrawer()
+    {
+        _isRightDrawerOpen = !_isRightDrawerOpen;
+    }
+
+}

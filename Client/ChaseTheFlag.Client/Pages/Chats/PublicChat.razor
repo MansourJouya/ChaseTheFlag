@@ -1,0 +1,155 @@
+﻿@inherits LayoutComponentBase
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject IJSRuntime JSRuntime
+
+
+<MudToolBar>
+    <MudText Typo="Typo.h6">Public chat</MudText>
+    <MudSpacer />
+    @if (PublicChatMessages.Count == 0)
+    {
+        <MudIconButton OnClick="DownloadData" Icon="@Icons.Material.Filled.Download" Color="Color.Default" />
+    }
+</MudToolBar>
+<MudDivider />
+<div style="display: flex; flex-direction: column; justify-content: flex-end; width: auto; height:99%;">
+    <div id="unique_id_scroll_section" class="ma-0" style="min-height: 0; height: auto; overflow-y: auto;">
+        @foreach (var message in PublicChatMessages)
+        {
+            <MudPaper Class="pa-2 ma-2" Elevation="5">
+                <MudText Color="Color.Primary" Typo="Typo.caption"><b>@message.SenderName</b></MudText> <br />
+                <MudText Style="@($"color:#BDBDBD;")" Typo="Typo.caption">@message.SendDateTime.ToString("yy/MM/dd HH:mm")</MudText>
+
+                <MudDivider Class="mb-2" />
+                <p class="multiline-text"> @message.Message</p>
+            </MudPaper>
+        }
+    </div>
+    <div style="margin-top: auto;">
+        <MudTextField MaxLength="100" Immediate @bind-Value="@CurrentMessage" Label="Type your message" Variant="Variant.Filled" OnKeyUp="@OnKeyUpTextMessageAsync" />
+    </div>
+</div>
+
+
+@code {
+
+    [Parameter]
+    public RegisteredUser Sender { get; set; } = new();                      // This property represents a registered user.
+     
+    [Parameter]
+    public UserDataLocal LocalUserData { get; set; } = new();             // This property represents local user data.
+    private HubConnection? _hubConnection;                                  // This field represents a connection to a hub, typically used in real-time communication.
+    private List<ChatPublic> PublicChatMessages = new List<ChatPublic>();   // This list holds chat messages.
+    private string CurrentMessage = string.Empty;                           // This variable stores the content of a text message.
+
+
+    // Sets up and starts a SignalR connection.
+    protected override async Task OnInitializedAsync()
+    {
+        // Create a new HubConnection using the HubConnectionBuilder.
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(ApiEndpoints.SignalRHubUrl()) // Set the URL for the SignalR hub.
+            .Build();
+
+        // Define a callback for the "ReceiveMessagePublic" event from the hub.
+        _hubConnection.On<ChatPublic>("ReceiveMessagePublic", (message) =>
+        {
+            // Add the received message to the Messages list.
+            PublicChatMessages.Add(message);
+
+            // Trigger a UI update.
+            StateHasChanged();
+        });
+
+        // Start the SignalR connection.
+        await _hubConnection.StartAsync();
+    }
+
+    // Handles user input, sends a message to the chat on "Enter" key press.
+    private async Task OnKeyUpTextMessageAsync(KeyboardEventArgs args)
+    {
+        // Check if the "Enter" key is pressed and the text message is not empty.
+        if (args.Key == "Enter" && !string.IsNullOrEmpty(CurrentMessage))
+        {
+            // Create a new ChatPublic message.
+            ChatPublic newMessage = new ChatPublic()
+                {
+                    Id = 0,
+                    SenderName = Sender.FirstName + " " + Sender.LastName,
+                    Message = CurrentMessage,
+                    SendDateTime = DateTime.Now,
+                };
+
+            // Clear the text message.
+            CurrentMessage = "";
+
+            // Trigger a UI update.
+            await InvokeAsync(StateHasChanged);
+
+            // Scroll to the bottom of the chat.
+            await ScrollToBottomAsync();
+
+            // Send the new message to the hub.
+            await SendToHubAsync(newMessage);
+        }
+    }
+
+    // Sends a chat message to the hub.
+    private async Task SendToHubAsync(ChatPublic chatPublic)
+    {
+        // Construct the API URL for sending the message.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"ChatPublic";
+
+        // Send an HTTP POST request to the API with the message data.
+        var userResult = await RequestHandler.SendHttpRequestAsync<ChatPublic, ChatPublic>(HttpMethod.Post, apiUrl, LocalUserData, chatPublic);
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // Handle success if needed.
+        }
+    }
+
+    //  Scrolls to the bottom of the chat.
+    private async Task ScrollToBottomAsync()
+    {
+        // Call a JavaScript function named "scrollToBottom" to scroll to the bottom of the chat.
+        await JSRuntime.InvokeVoidAsync("scrollToBottom");
+    }
+
+    // Downloads public chat data from the API.
+    private async Task DownloadData()
+    {
+        // Construct the API URL to download public chat data.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"ChatPublic";
+
+        // Send an HTTP GET request to the API to download public chat data.
+        var userResult = await RequestHandler.SendHttpRequestAsync<ChatPublic, List<ChatPublic>>(HttpMethod.Get, apiUrl, LocalUserData);
+
+        // Check if the HTTP request was successful.
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // If successful, assign the downloaded messages to the Messages property.
+            PublicChatMessages = userResult.Value;
+
+            // Trigger a UI update.
+            StateHasChanged();
+        }
+    }
+
+}
+
+
+
+<style>
+    .multiline-text {
+        white-space: pre-line;
+        overflow-wrap: break-word;
+    }
+</style>
+<script>
+    function scrollToBottom() {
+        var scrollSection = document.getElementById('unique_id_scroll_section');
+        scrollSection.scrollTop = scrollSection.scrollHeight;
+        }
+</script>

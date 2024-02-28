@@ -1,0 +1,195 @@
+﻿
+@inherits LayoutComponentBase
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject NavigationManager NavigationManager
+
+
+@if (RegisteredRoomsList != null)
+{
+    <MudPaper Elevation="0">
+        <MudToolBar>
+            <MudIcon Icon="@Icons.Material.Filled.Groups" Class="mr-2" Size="Size.Medium" Title="Favorite" />
+            <MudText Typo="Typo.h6">Rooms</MudText>
+            <MudSpacer />
+            <MudIconButton Icon="@Icons.Material.Outlined.Add" OnClick="AddNewRoom" Color="Color.Inherit" />
+        </MudToolBar>
+        <MudDivider />
+
+        <MudList Clickable="true" Dense="true">
+            @foreach (var item in RegisteredRoomsList)
+            {
+                <MudListItem OnClick="@(() =>ConfirmAndJoinRoomAsync(item))">
+                    <MudAvatar Style="@($"height:30px; width:30px; font-size:1rem; background:{item.Color};")">G</MudAvatar>
+                    @item.Name
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+    <AddGroup OnDataUpdated="UpdateDataAsync" isEdit="@IsEditing" Room="CurrentRoom" _isVisible="@IsVisible" RegisteredRoomId="@RoomId" UserDataLocal="@LocalUserData" />
+
+}
+
+
+@if (MyRegisteredRoomsList != null)
+{
+    <MudDivider />
+    <MudPaper Elevation="0">
+        <MudToolBar>
+            <MudIcon Icon="@Icons.Material.Filled.Group" Class="mr-2" Size="Size.Medium" Title="Favorite" />
+
+            <MudText Typo="Typo.h6">My Rooms</MudText>
+
+        </MudToolBar>
+        <MudDivider />
+
+
+        <MudList Clickable="true" Dense="true">
+            @foreach (var item in MyRegisteredRoomsList)
+            {
+                <MudListItem OnClick="@(() =>JoinGameAsync(item))">
+                    <MudAvatar Style="@($"height:30px; width:30px; font-size:1rem; background:{item.Color};")">G</MudAvatar>
+                    @item.Name
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+}
+
+@code {
+
+    #region Parameter
+    [Parameter]
+    public UserDataLocal LocalUserData { get; set; } = new(); // Represents local user data.
+
+    [Parameter]
+    public EventCallback<RegisteredRoom> JoinGameEvent { get; set; } // Event callback for joining a game.
+    #endregion
+
+    #region Local Variables
+    private bool IsVisible { get; set; } // Indicates visibility status.
+    private bool IsEditing { get; set; } = false; // Indicates editing status, default is false.
+    private int RoomId { get; set; } // ID of the registered room.
+    private List<RegisteredRoom> RegisteredRoomsList = new(); // List to store registered rooms.
+    private List<RegisteredRoom> MyRegisteredRoomsList = new(); // List to store registered rooms for the current user.
+    private Room? CurrentRoom { get; set; } // Nullable property for current room.
+    #endregion
+
+    // Creates a new room and sets it as the current room while making it visible in the UI.
+    private void AddNewRoom()
+    {
+        // Creates a new Room object and assigns it to the CurrentRoom property.
+        CurrentRoom = new Room();
+
+        // Sets the IsVisible flag to true.
+        IsVisible = true;
+    }
+
+    // Overrides a lifecycle method to load data for rooms asynchronously when parameters are set, typically during component initialization.
+    protected override async Task OnParametersSetAsync()
+    {
+        // Loads data for rooms asynchronously.
+        await LoadDataRoomsAsync();
+
+        // Calls the base implementation of the OnParametersSetAsync method.
+        await base.OnParametersSetAsync();
+    }
+
+    // Invokes an asynchronous event to join a game with the specified room.
+    private async Task JoinGameAsync(RegisteredRoom room)
+    {
+        // Invokes the JoinGameEvent asynchronous event with the specified room.
+        await JoinGameEvent.InvokeAsync(room);
+    }
+
+    // Updates data, setting visibility to false and then loading data for rooms asynchronously.
+    private async Task UpdateDataAsync()
+    {
+        // Set the IsVisible flag to false.
+        IsVisible = false;
+
+        // Load data for rooms asynchronously.
+        await LoadDataRoomsAsync();
+    }
+
+    // Asynchronously loads data for rooms, excluding those owned by the local user, from the API.
+    private async Task LoadDataRoomsAsync()
+    {
+        // Check if LocalUserData is null, if so, return without further execution.
+        if (LocalUserData == null)
+            return;
+
+        // Construct the API URL to fetch registered rooms excluding those owned by the local user.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"RegisteredRooms/Rooms/{LocalUserData.Id}/{false}";
+
+        // Send an HTTP GET request to the API to fetch registered rooms excluding those owned by the local user.
+        var userResult = await RequestHandler.SendHttpRequestAsync<RegisteredRoom, List<RegisteredRoom>>(HttpMethod.Get, apiUrl, LocalUserData);
+
+        // Check if the HTTP request was successful.
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // If successful, assign the list of registered rooms to the RegisteredRoomsList property.
+            RegisteredRoomsList = userResult.Value;
+        }
+
+        // Load the registered rooms owned by the local user.
+        await LoadDataMyRoomsAsync();
+    }
+
+    // Asynchronously loads data for rooms owned by the local user from the API.
+    private async Task LoadDataMyRoomsAsync()
+    {
+        // Construct the API URL to fetch registered rooms for the local user.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"RegisteredRooms/Rooms/{LocalUserData.Id}/{true}";
+
+        // Send an HTTP GET request to the API to fetch the registered rooms for the local user.
+        var userResult = await RequestHandler.SendHttpRequestAsync<RegisteredRoom, List<RegisteredRoom>>(HttpMethod.Get, apiUrl, LocalUserData);
+
+        // Check if the request was successful.
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // If successful, assign the list of registered rooms to the MyRegisteredRoomsList property.
+            MyRegisteredRoomsList = userResult.Value;
+        }
+    }
+
+    // Shows a confirmation dialog to the user before joining the specified room asynchronously.
+    private async Task ConfirmAndJoinRoomAsync(RegisteredRoom room)
+    {
+        // Show a confirmation dialog to the user asking if they want to join the specified room.
+        if (!await MyDialog.Show("Join", $"Are you sure to join the {room.Name} room?", "Join", Color.Success, new DialogOptions() { CloseButton = true }))
+        {
+            // If the user chooses not to join (closes the dialog), execute the JoinRoomAsync method.
+            await JoinRoomAsync(room);
+        }
+    }
+
+    // Joins the specified room asynchronously.
+    private async Task JoinRoomAsync(RegisteredRoom room)
+    {
+        // Construct the API URL using the GetApiBaseUrl() method from the ApiEndpoints class.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"UserInRoom";
+
+        // Create a UserInRoom object with local room and user information.
+        UserInRoom userInRoom = new UserInRoom()
+            {
+                RoomId = room.Id,
+                UserId = LocalUserData.Id
+            };
+
+        // Send an HTTP POST request to the API using RequestHandler.SendHttpRequestAsync,
+        // sending local user data and room information.
+        var userResult = await RequestHandler.SendHttpRequestAsync<UserInRoom, UserInRoom>(HttpMethod.Post, apiUrl, LocalUserData, userInRoom);
+
+        // If the request is successful (Status == ResultStatus.Success),
+        // call LoadDataRoomsAsync() function and then call StateHasChanged().
+        if (userResult.Status == ResultStatus.Success)
+        {
+            await LoadDataRoomsAsync();
+            StateHasChanged();
+        }
+    }
+
+
+}

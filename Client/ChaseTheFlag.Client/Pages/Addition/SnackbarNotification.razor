@@ -1,0 +1,35 @@
+﻿@inherits ComponentBase
+@inject ISnackbar Snackbar
+
+@code {
+    [Parameter]
+    public string Text { get; set; } = string.Empty;            // Text displayed in the snackbar
+
+    [Parameter]
+    public Severity Severity { get; set; } = Severity.Error;    // Severity of the snackbar (e.g., Error, Warning, Success)
+
+    [Parameter]
+    public bool Visible { get; set; } = true;                   // Indicates whether the snackbar is visible
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+
+        // If the snackbar is visible, configure and show it
+        if (Visible)
+        {
+            ConfigureAndShowSnackbar();
+        }
+    }
+
+    // Configures and shows the snackbar
+    private void ConfigureAndShowSnackbar()
+    {
+        // Configuring snackbar position and variant
+        Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+        Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+
+        // Adding snackbar message with specified text and severity
+        Snackbar.Add(Text, Severity);
+    }
+}

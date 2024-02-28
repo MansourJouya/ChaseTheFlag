@@ -1,0 +1,302 @@
+﻿
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject NavigationManager NavigationManager
+@inject SnackbarManager SnackbarManager
+@inject ISnackbar Snackbar
+
+@winner
+<MudPaper Elevation="0">
+    <MudToolBar>
+        <MudText Typo="Typo.h6">@Room.Name @Room.Level</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.ExitToApp" OnClick="ExitAsync" Color="Color.Default" />
+    </MudToolBar>
+    <MudDivider />
+
+    <MudButton OnClick="BtnStartGameAsync" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">Start Game</MudButton>
+
+
+    @if (userChatList != null)
+    {
+        <MudList Clickable="true" Dense="true">
+            @foreach (var item in userChatList)
+            {
+                <MudListItem Dense="true" OnClick="@(() =>OpenChat(item))">
+                    <MudAvatar Style="@($"height:30px; width:30px; font-size:1rem; background:{item.Color};")">G</MudAvatar>
+                    @item.FirstName @item.LastName
+                    @if (IsUserOnline(item.PlayerTag))
+                    {
+                        <MudAvatar Style="@($"height:12px; width:12px; font-size:1rem; background:#00ff00;")"></MudAvatar>
+                    }
+                    else
+                    {
+                        <MudAvatar Style="@($"height:12px; width:12px; font-size:1rem; background:#ff0000;")"></MudAvatar>
+                    }
+                </MudListItem>
+            }
+        </MudList>
+    }
+    <MudDivider />
+</MudPaper>
+
+@if (isChatVisible)
+{
+    <PrivateChat ChatExitCallback="CloseChat" UsetRecive="receivedUser" UsetSend="Me" UserDataLocal="UserDataLocal" />
+}
+
+
+
+@code {
+
+
+    [Parameter]
+    public RegisteredUser Me { get; set; } = new();                     // Represents the currently registered user. Defaults to a new instance.
+
+    [Parameter]
+    public RegisteredRoom Room { get; set; } = new();                   // Represents the registered room. Defaults to a new instance.
+
+    [Parameter]
+    public string PlayerTag { get; set; } = string.Empty;               // Represents the player tag. Defaults to an empty string.
+
+    [Parameter]
+    public UserDataLocal UserDataLocal { get; set; } = new();           // Represents the local user data. Defaults to a new instance.
+
+    [Parameter]
+    public EventCallback ExitInGroup { get; set; }                      // Represents the event callback for exiting a group.
+
+
+
+
+    private HubConnection? _hubConnection;                              // Represents the SignalR hub connection.
+    private string winner { get; set; } = string.Empty;                 // Represents the winner of the game. Defaults to an empty string.
+    private bool gameStarted { get; set; } = false;                     // Indicates whether the game has started. Defaults to false.
+    private byte Target { get; set; } = 0x00;                           // Represents the target byte value. Defaults to 0x00.
+    private byte[] userStatusList;                                      // Represents the list of status for users.
+    private RegisteredUser receivedUser { get; set; } = new();          // Represents the received user data. Defaults to a new instance.
+    private bool isChatVisible { get; set; }                            // Indicates whether the chat is being shown.
+    private List<RegisteredUser> userChatList = new();                  // Represents the list of users for chat.
+
+
+    // Used for initializing and starting connections to external services such as SignalR.
+    protected override async Task OnInitializedAsync()
+    {
+
+        _hubConnection = new HubConnectionBuilder()
+             .WithUrl(ApiEndpoints.SignalRHubUrl())
+             .Build();
+
+        _hubConnection.On<byte[]>("ReceiveStatusMessage", (listStatusUser) =>
+        {
+            if (listStatusUser[0] == 0x00 &&  // system
+                listStatusUser[1] == 0x03 &&  // King
+                listStatusUser[2] == Room.Id)  // Room
+            {
+                userStatusList = null!;
+                userStatusList = listStatusUser;
+
+                StateHasChanged();
+            }
+        });
+
+        _hubConnection.On<byte[]>("ReceiveStatusGame", (status) =>
+        {
+            if (status[0] != 0x01 && status[1] != 0x04)   // updata 0x01 and King 0x04
+                return;
+
+
+            // chaeking Room
+            if (status[5] != BitConverter.GetBytes(Room.Id)[0])
+                return;
+
+
+            // cheking End game and lose target
+            if (status[4] == 0x01 && status[3] == 0x00)
+            {
+                SnackbarManager.Show("Target is lost", Severity.Warning);
+                return;
+            }
+
+            ResetTarget(status[3]);
+
+            // checking end game
+            if (status[4] == 0x01)
+            {
+                if (status[3] == Encoding.UTF8.GetBytes(Me.PlayerTag)[0])
+                    SnackbarManager.Show("You win :)", Severity.Success);
+
+                else
+                    SnackbarManager.Show("You lose :(", Severity.Error);
+            }
+
+            // cheking run Game
+            if (status[4] == 0x00 && status[2] == 0x00)
+            {
+                if (status[3] == Encoding.UTF8.GetBytes(Me.PlayerTag)[0])
+                    SnackbarManager.Show("You lose :(", Severity.Error);
+
+            }
+
+
+            ResetTarget(status[3]);
+            StateHasChanged();
+        });
+        await _hubConnection.StartAsync();
+
+    }
+
+    // Responsible for setting parameters related to the component after the first render and receiving data from servers.
+    protected override async Task OnParametersSetAsync()
+    {
+
+        await LoadChatUsersAsync();
+        await SendAddDataToHubAsync();
+        await base.OnParametersSetAsync();
+
+    }
+
+    // Handles resetting the target value.
+    private void ResetTarget(byte newTarget)
+    {
+        Target = newTarget;
+
+    }
+
+    // Manages the process of starting the game.
+    private async Task BtnStartGameAsync()
+    {
+
+        int countUserOnline = CountUserOnline();
+        if (countUserOnline > 1)
+        {
+            if (!await MyDialog.Show("Start Game", $"Are you sure you want to start the game with {countUserOnline} players?", "Start", Color.Primary, new DialogOptions() { CloseButton = true }))
+            {
+
+                byte level = 0x02;
+                List<byte> StartGame = new List<byte>();
+
+                StartGame.Add(0x01);                // 0 update
+                StartGame.Add(0x01);                // 1 King
+                StartGame.Add(Target);              // 2 Target
+                StartGame.Add(userStatusList[2]);   // 3 Room
+                StartGame.Add(level);               // 4 Level
+
+                for (int i = 3; i < userStatusList.Length; i++)
+                {
+                    StartGame.Add(userStatusList[i]);
+                }
+   
+                byte[] SendListData = StartGame.ToArray();
+                string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"SignalR/StartGame";
+                var userResult = await RequestHandler.SendHttpRequestAsync<byte[], byte[]>(HttpMethod.Post, apiUrl, UserDataLocal, SendListData);
+                if (userResult.Status == ResultStatus.Success)
+                {
+                    winner = "";
+                }
+            }
+        }
+        else
+        {
+            SnackbarManager.Show($"There are {countUserOnline} online players. At least 2 players are required to start the game.", Severity.Error);
+            gameStarted = false;
+        }
+
+    }
+
+    // Controls the opening of a chat with a specific user.
+    private void OpenChat(RegisteredUser user)
+    {
+        if (user.Id != Me.Id)
+        {
+            receivedUser = user;
+            isChatVisible = true;
+        }
+        else
+        {
+            isChatVisible = false;
+        }
+
+    }
+
+    // Handles the closing of an ongoing chat.
+    private void CloseChat()
+    {
+        receivedUser = null!;
+        isChatVisible = false;
+        StateHasChanged();
+    }
+
+    // Counts the number of users online in a particular room.
+    private int CountUserOnline()
+    {
+        int Count = 0;
+        if (userChatList == null)
+            return Count;
+
+        foreach (var item in userChatList)
+            if (IsUserOnline(item.PlayerTag))
+                Count++;
+        return Count;
+    }
+
+    // Checks whether a user is currently online.
+    private bool IsUserOnline(string playerTag)
+
+    {
+        if (userStatusList == null)
+            return false;
+        return Encoding.ASCII.GetString(userStatusList).Contains(playerTag);
+    }
+
+    // private void ConfigureAndShowSnackbar(string text, Severity severity = Severity.Warning)
+    // {
+    //     Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+    //     Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+    //     Snackbar.Add(text, severity);
+    // }
+
+    private async Task ExitAsync()
+    {
+        if (!await MyDialog.Show("Exit", $"Are you sure to Exit the {Room.Name}", "Exit", Color.Error, new DialogOptions() { CloseButton = true }))
+        {
+            await ExitInGroup.InvokeAsync();
+            await SendExitDataToHubAsync();
+        }
+    }
+    
+    //Sends data to the hub for processing when exiting a group.
+    private async Task SendExitDataToHubAsync()
+    {
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"SignalR/RemoveUserInGroup/{PlayerTag}";
+        var userResult = await RequestHandler.SendHttpRequestAsync<string, string>(HttpMethod.Post, apiUrl, UserDataLocal);
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // show message
+        }
+    }
+
+    // Sends data to the hub for processing when adding a user to a group.
+    private async Task SendAddDataToHubAsync()
+    {
+
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"SignalR/AddUserInGroup/{PlayerTag}/{Room.Id}";
+        var userResult = await RequestHandler.SendHttpRequestAsync<string, string>(HttpMethod.Post, apiUrl, UserDataLocal);
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // show message
+        }
+    }
+
+    //  Loads the list of users available for chat.
+    private async Task LoadChatUsersAsync()
+    {
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"RegisteredUsers/LisUserChat/{Room.Id}";
+
+        var userResult = await RequestHandler.SendHttpRequestAsync<RegisteredUser, List<RegisteredUser>>(HttpMethod.Get, apiUrl, UserDataLocal);
+        if (userResult.Status == ResultStatus.Success)
+            userChatList = userResult.Value;
+
+    }
+
+}

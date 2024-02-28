@@ -1,0 +1,169 @@
+﻿
+@inherits LayoutComponentBase
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject IJSRuntime JSRuntime
+
+<style>
+    .multiline-text {
+        white-space: pre-line;
+        overflow-wrap: break-word;
+    }
+</style>
+
+<script>
+    function scrollToBottom() {
+        var scrollSection = document.getElementById('unique_id_scroll_section');
+        scrollSection.scrollTop = scrollSection.scrollHeight;
+    }
+</script>
+
+
+<MudToolBar>
+    <MudText Typo="Typo.h6">@UsetRecive.FirstName @UsetRecive.LastName</MudText>
+    <MudSpacer />
+    <MudIconButton OnClick="HandleChatClosingAysnc" Icon="@Icons.Material.Filled.Close" Color="Color.Default" />
+</MudToolBar>
+<MudDivider />
+<div style="display: flex; flex-direction: column; justify-content: flex-end; width: auto; height:99%;">
+    <div id="unique_id_scroll_section" class="ma-0" style="min-height: 0; height: auto; overflow-y: auto;">
+        @foreach (var message in PrivateChatMessages)
+        {
+            <MudPaper Class="pa-2 ma-2" Elevation="5">
+                <MudText Color="Color.Primary" Typo="Typo.caption"><b>@message.SenderName</b></MudText> <br />
+                <MudText Style="@($"color:#BDBDBD;")" Typo="Typo.caption">@message.SendDateTime.ToString("yy/MM/dd HH:mm")</MudText>
+
+                <MudDivider Class="mb-2" />
+                <p class="multiline-text"> @message.Message</p>
+            </MudPaper>
+        }
+    </div>
+    <div style="margin-top: auto;">
+        <MudTextField MaxLength="100" Immediate @bind-Value="@CurrentMessage" Label="Type your message" Variant="Variant.Filled" OnKeyUp="@HandleTextMessageKeyPressAsync" />
+    </div>
+</div>
+@code {
+
+
+    [Parameter]
+    public UserDataLocal UserDataLocal { get; set; }=new();                     // UserDataLocal represents local user data.
+
+    [Parameter]
+    public RegisteredUser UsetSend { get; set; } = new();                       // Represents the user who is sending the message.
+
+    [Parameter]
+    public RegisteredUser UsetRecive { get; set; } = new();                     // Represents the user who is receiving the message.
+
+    [Parameter]
+    public EventCallback ChatExitCallback { get; set; }                         // Represents an event callback for exiting the chat.
+
+    private HubConnection? _hubConnection;                                      // Represents a nullable HubConnection instance used for communication.
+    private List<ChatPrivate> PrivateChatMessages = new List<ChatPrivate>();    // Holds private chat messages.
+    private string CurrentMessage = string.Empty;                               // Stores the content of a text message.
+
+    // Loads private chat data if it's the first render.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await LoadPrivateChatDataaysnc(); // Load private chat data asynchronously if it's the first render.
+            }
+            catch
+            {
+                // Handle any exceptions.
+            }
+            finally
+            {
+                StateHasChanged(); // Ensure the state change is reflected in the UI.
+            }
+        }
+    }
+
+    // Initializes SignalR connection and defines a callback for receiving private chat messages.
+    protected override async Task OnInitializedAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+             .WithUrl(ApiEndpoints.SignalRHubUrl()) // Configure SignalR hub URL.
+             .Build();
+
+        _hubConnection.On<ChatPrivate>("ReceiveMessagePrivate", (message) =>
+            {
+                // Receives private messages and adds them to the chat if they are meant for the current user pair.
+                if ((message.UserIdReceive == UsetRecive.Id && message.UserIdSend == UsetSend.Id) ||
+                message.UserIdReceive == UsetSend.Id && message.UserIdSend == UsetRecive.Id)
+                {
+                    PrivateChatMessages.Add(message);
+                    StateHasChanged(); // Update UI.
+                }
+            });
+
+        await _hubConnection.StartAsync(); // Start SignalR connection.
+    }
+
+    // Handles closing of the chat.
+    private async Task HandleChatClosingAysnc()
+    {
+        await ChatExitCallback.InvokeAsync(); // Invoke chat exit callback.
+    }
+
+    // Loads private chat data from the server.
+    private async Task LoadPrivateChatDataaysnc()
+    {
+        // Load private chat data from the server.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"ChatPrivate/{UserDataLocal.Id}/{UsetRecive.Id}";
+
+        var userResult = await RequestHandler.SendHttpRequestAsync<ChatPrivate, List<ChatPrivate>>(HttpMethod.Get, apiUrl, UserDataLocal);
+        if (userResult.Status == ResultStatus.Success)
+        {
+            PrivateChatMessages = userResult.Value;
+            StateHasChanged(); // Update UI.
+        }
+    }
+
+    // Handles sending a private message when "Enter" key is pressed.
+    private async Task HandleTextMessageKeyPressAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrEmpty(CurrentMessage))
+        {
+            // Handles sending a private message when "Enter" key is pressed.
+            ChatPrivate newMessage = new ChatPrivate()
+                {
+                    Id = 0,
+                    PlayerTag = UsetSend.PlayerTag,
+                    SenderName = UsetSend.FirstName + " " + UsetSend.LastName,
+                    UserIdSend = UsetSend.Id,
+                    UserIdReceive = UsetRecive.Id,
+                    Message = CurrentMessage,
+                    SendDateTime = DateTime.Now,
+                };
+
+
+            CurrentMessage = ""; // Clear the current message.
+            await InvokeAsync(StateHasChanged); // Update UI.
+            await ScrollChatToBottomAysnc(); // Scroll to the bottom of the chat asynchronously.
+
+            await SendPrivateMessageToHubAysnc(newMessage); // Send the private message to the SignalR hub asynchronously.
+        }
+    }
+
+    // Sends a private message to the SignalR hub.
+    private async Task SendPrivateMessageToHubAysnc(ChatPrivate chatPrivate)
+    {
+        // Send a private message to the SignalR hub.
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"ChatPrivate";
+
+        var userResult = await RequestHandler.SendHttpRequestAsync<ChatPrivate, ChatPrivate>(HttpMethod.Post, apiUrl, UserDataLocal, chatPrivate);
+        if (userResult.Status == ResultStatus.Success)
+            Console.WriteLine("Connection to hub is not established."); // Log if the connection to the hub is not established.
+    }
+
+    // Scrolls the chat window to the bottom.
+    private async Task ScrollChatToBottomAysnc()
+    {
+        await JSRuntime.InvokeVoidAsync("scrollToBottom"); // Scroll the chat window to the bottom asynchronously.
+    }
+
+}

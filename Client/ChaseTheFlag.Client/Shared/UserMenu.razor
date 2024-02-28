@@ -1,0 +1,68 @@
+﻿@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+
+@if (CurrentUser != null)
+{
+    <MudChip Style="@($"background:{CurrentUser.Color};")">
+        <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">Your Color</MudText>
+    </MudChip>
+}
+<MudSpacer />
+<MudChip Color="Color.Primary">Online: @OnlineUserCount</MudChip>
+<MudChip Color="Color.Primary">Lost: @CurrentUser!.NumberOfLosses</MudChip>
+<MudChip Color="Color.Primary">Win: @CurrentUser!.NumberOfWins</MudChip>
+<MudMenu FullWidth="true" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+    <ActivatorContent>
+        <MudChip Icon="@Icons.Material.Filled.Person" Color="Color.Primary"> @CurrentUser!.FirstName @CurrentUser.LastName (@CurrentUser.PlayerTag) </MudChip>
+    </ActivatorContent>
+    <ChildContent>
+        <MudMenuItem>
+            <div style="display: flex; align-items: center;">
+                <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2 mt-0" Color="Color.Default" Size="Size.Small" />
+                <MudText Typo="Typo.button" Color="Color.Default" Class="mt-1">Profile</MudText>
+            </div>
+        </MudMenuItem>
+        <MudMenuItem>
+            <div style="display: flex; align-items: center;">
+                <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-2 mt-0" Color="Color.Default" Size="Size.Small" />
+                <MudText Typo="Typo.button" Color="Color.Default" Class="mt-1">Setting</MudText>
+            </div>
+        </MudMenuItem>
+
+        <MudMenuItem OnClick="@PerformSignOutAsync">
+            <div style="display: flex; align-items: center;">
+                <MudIcon Icon="@Icons.Material.Filled.ExitToApp" Class="mr-2 mt-0" Color="Color.Default" Size="Size.Small" />
+                <MudText Typo="Typo.button" Color="Color.Default" Class="mt-1">Exit</MudText>
+            </div>
+        </MudMenuItem>
+    </ChildContent>
+
+</MudMenu>
+<MudChip Color="@(IsConnected ? Color.Success : Color.Error)">@(IsConnected ? "Online" : "Offline")</MudChip>
+
+@code {
+    #region Local Variables
+    [Parameter]
+    public int OnlineUserCount { get; set; } = 0;                                   // Represents the count of online users.
+
+    [Parameter]
+    public RegisteredUser CurrentUser { get; set; } = new RegisteredUser();        // Represents the currently registered user.
+    
+    [Parameter]
+    public bool IsConnected { get; set; } = false;                                 // Indicates whether the application is connected to the SignalR hub.
+    #endregion
+
+    // This method signs out the user from the game if they confirm the exit.
+    private async Task PerformSignOutAsync()
+    {
+        // Display a confirmation dialog to the user
+        bool confirmedExit = await MyDialog.Show("Exit", "The Chase The Flag Game will be closed. Are you sure you want to exit?", "Exit", Color.Error, new DialogOptions() { CloseButton = true });
+
+        // If the user confirms the exit, sign out from the authentication service
+        if (!confirmedExit)
+        {
+            await AuthService.Logout();
+        }
+    }
+
+}

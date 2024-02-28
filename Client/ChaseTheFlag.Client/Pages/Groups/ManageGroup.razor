@@ -1,0 +1,56 @@
+﻿
+@inherits LayoutComponentBase
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject NavigationManager NavigationManager
+
+
+@if (IsGroup)
+{
+    <ListGroup JoinGameEvent="JoinGameAsync" LocalUserData="UserAccount" />
+}
+else
+{
+    <ListUserForChatAndGame Me="CurrentUser" PlayerTag="@PlayerTag" ExitInGroup="ExitInGroup" Room="Room" UserDataLocal="UserAccount" />
+}
+
+@code {
+
+    #region Parameter
+    [Parameter]
+    public UserDataLocal UserAccount { get; set; } = new();     // Represents the user account data. Initialized with a new instance of UserDataLocal by default.
+
+    [Parameter]
+    public string PlayerTag { get; set; } = string.Empty;       // Represents the player tag associated with the component.
+
+    [Parameter]
+    public RegisteredUser CurrentUser { get; set; } = new();    // Represents the current registered user passed to the component
+    #endregion
+
+    #region Local Variables
+    private RegisteredRoom Room { get; set; } = new();          // Represents the registered room.
+    private bool IsGroup { get; set; } = true;                  // Indicates whether it is a group.
+    private string GroupName { get; set; } = string.Empty;      // Represents the name of the group.
+    #endregion
+
+    // Initiates joining the specified game room after user confirmation.
+    private async Task JoinGameAsync(RegisteredRoom room)
+    {
+        if (!await MyDialog.Show("Join", $"Are you sure to join the {room.Name} game?", "Join", Color.Primary, new DialogOptions() { CloseButton = true }))
+        {
+            Room = room;
+            IsGroup = false;
+            StateHasChanged();
+        }
+    }
+
+    // Initiates exiting from the current group.
+    private void ExitInGroup()
+    {
+        Room = null!;
+        IsGroup = true;
+        StateHasChanged();
+    }
+
+}

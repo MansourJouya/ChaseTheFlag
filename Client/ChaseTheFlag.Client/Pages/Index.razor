@@ -1,0 +1,303 @@
+﻿@page "/Home"
+@attribute [Authorize]
+
+@inherits LayoutComponentBase
+@inject MyDialog MyDialog
+@inject AuthenticationService AuthService
+@inject RequestHandler RequestHandler
+@inject ISnackbar Snackbar
+
+
+<PageTitle>Index</PageTitle>
+
+
+
+<body @onkeydown="OnKeyDown" tabindex="0">
+    
+    @if (Board != null)
+    {
+
+        @if (Convert.ToChar(Target).ToString() == _registeredUser.PlayerTag)
+        {
+            <MudChip Style="@($"background:#1B5E20;")">
+                <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">You is Target </MudText>
+            </MudChip>
+        }
+        else
+        {
+            <MudChip Style="@($"background:{_registeredUser.Color};")">
+                <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">You</MudText>
+            </MudChip>
+            <MudChip Style="@($"background:#1B5E20;")">
+                <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">Target </MudText>
+            </MudChip>
+        }
+
+
+
+        <MudChip Style="@($"background:#24292e;")">
+            <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">Barrier</MudText>
+        </MudChip>
+
+        <MudChip Style="@($"background:#C51162;")">
+            <MudText Typo="Typo.inherit" Style="@($"color:#FFFFFF;")">Other User</MudText>
+        </MudChip>
+
+
+
+
+
+        <div style="margin-top: 80px; padding: 20px;">
+            <div @ref="divElement" tabindex="0" style="width:100%; height:100%;" @onclick="@FocusDivOnClickAsync">
+                <div class="row">
+                    <svg width="40vmin" height="40vmin" viewBox="0 0 @Board.GetLength(0) @Board.GetLength(1)" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">
+                        @for (int i = 0; i < Board.GetLength(0); i++)
+                        {
+                            @for (int j = 0; j < Board.GetLength(1); j++)
+                            {
+                                <rect fill="@GetColorForTile(Board[i, j],i,j)" stroke="#00092e" stroke-width="0" width=".98" height=".98" x="@(i + .025)" y="@(j + .025)" />
+                            }
+                        }
+                    </svg>
+                </div>
+            </div>
+        </div>
+    }
+
+</body>
+
+
+@code {
+    private UserDataLocal _userDataLocal = new();   // Represents the local user data.
+    private RegisteredUser _registeredUser = new(); // Represents the user who is registered.
+    private HubConnection? hubConnection;           // Represents a connection to a SignalR hub.
+    private Tile[,]? Board;                         // Represents a nullable two-dimensional array of tiles.
+    private ElementReference divElement;            // Represents a reference to an HTML element.
+    private byte Target { get; set; } = 0x00;       // Represents the target value for some operation.
+    private byte RoomID { get; set; } = 0x00;       // Represents the ID of a room.
+    private byte Level { get; set; } = 0x00;        // Represents the level for a certain task.
+
+
+
+
+    //  This method returns a color code corresponding to the type of tile passed as an argument 
+    // (such as empty tile, player's tile, barrier, etc.), based on its switch case implementation.
+    private string GetColorForTile(Tile tile, int x, int y)
+    {
+
+
+        switch (tile)
+        {
+            case Tile.Empty: return "#EEEEEE";
+            case Tile.Me: return _registeredUser.Color;
+            case Tile.Barrier: return "#24292e";
+            case Tile.OtherUser: return "#C51162"; // RGB
+            case Tile.Target: return "#1B5E20";
+            default: return "";
+        }
+    }
+
+    // This asynchronous method handles keydown events. 
+    // It sets the key variable based on the pressed key and determines the direction of movement (direction) based on the arrow keys.
+    // Then it constructs a byte array list representing a game message with various parameters, 
+    // and sends it to the server using an HTTP POST request.
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+       
+        string direction = "";
+        switch (args.Key)
+        {
+            case "ArrowLeft": direction = "L"; break;
+            case "ArrowRight": direction = "R"; break;
+            case "ArrowUp": direction = "U"; break;
+            case "ArrowDown": direction = "D"; break;
+            default: return;
+        }
+
+
+        byte[] list = new byte[7];
+
+        list[0] = 0x01;                                                             // Game Message
+        list[1] = 0x03;                                                             // King
+        list[2] = Target;                                                           // Target
+        list[3] = RoomID;                                                           // Room
+        list[4] = Level;                                                            // Level
+        list[5] = Encoding.UTF8.GetBytes(_registeredUser.PlayerTag)[0];             // User
+        list[6] = Encoding.UTF8.GetBytes(direction)[0];                             // Direction
+
+
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"SignalR/UpdateGame";
+        var userResult = await RequestHandler.SendHttpRequestAsync<byte[], byte[]>(HttpMethod.Post, apiUrl, _userDataLocal, list);
+        if (userResult.Status == ResultStatus.Success)
+        {
+            // show message
+        }
+
+    }
+
+    // This asynchronous method focuses on a specific HTML element (divElement) when clicked.
+    private async Task FocusDivOnClickAsync()
+    {
+        await divElement.FocusAsync();
+    }
+
+    // This method is called during the initialization of the component. It sets up a SignalR connection, 
+    // defines event handlers for receiving game start, exit, and status messages, and starts the SignalR connection.
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(ApiEndpoints.SignalRHubUrl())
+            .Build();
+
+        hubConnection.On<byte[]>("ReceiveStartGame", (byteArray) =>
+        {
+            if (byteArray.ToList().IndexOf(Encoding.UTF8.GetBytes(_registeredUser.PlayerTag)[0]) > 0)
+            {
+                Target = byteArray[2];
+                RoomID = byteArray[3];
+                Level = byteArray[4];
+                Board = ConvertLocationToBoard(byteArray, Encoding.UTF8.GetBytes(_registeredUser.PlayerTag)[0]);
+                StateHasChanged();
+            }
+        });
+
+        hubConnection.On<bool, string>("ReceiveExitGame", (exit, tag) =>
+          {
+              if (exit && tag == _registeredUser.PlayerTag)
+              {
+                  Target = 0x00;
+                  RoomID = 0x00;
+                  Level = 0x00;
+                  Board = null!;
+                  StateHasChanged();
+              }
+          });
+
+        hubConnection.On<byte[]>("ReceiveStatusGame", (status) =>
+        {
+            if (status[0] != 0x01 && status[1] != 0x04)   // updata 0x01 and King 0x04
+                return;
+
+            // checking end game
+            if ((status[4] == 0x01 && status[5] == RoomID))
+            {
+                Board = null!;
+                StateHasChanged();
+                return;
+            }
+
+            if (status[4] == 0x01 && status[5] == RoomID && status[3] == Encoding.UTF8.GetBytes(_registeredUser.PlayerTag)[0])
+            {
+                Board = null!;
+                StateHasChanged();
+                return;
+            }
+
+            // ckeking me lose
+            if (status[4] == 0x00 && status[5] == RoomID && status[3] == Encoding.UTF8.GetBytes(_registeredUser.PlayerTag)[0])
+            {
+                Board = null!;
+                StateHasChanged();
+                return;
+            }
+
+            StateHasChanged();
+        });
+
+
+
+        await hubConnection.StartAsync();
+    }
+
+    // This method converts a byte array representing the location of game elements into a
+    //  two-dimensional array (Board) of Tile enum types. It assigns tiles for different elements 
+    // such as the player, empty spaces, barriers, and the target based on specific byte values in the input array.
+    private Tile[,] ConvertLocationToBoard(byte[] Location, byte thisMe)
+    {
+        int setingCell = 5;
+        int size = (int)Math.Sqrt(Location.Length - setingCell);
+        Tile[,] Board = new Tile[size, size];
+
+        for (int i = 0, index = setingCell; i < size; i++)
+            for (int j = 0; j < size; j++)
+            {
+
+                if (thisMe == Location[index])
+                    Board[i, j] = Tile.Me;
+                else
+
+                    switch (Location[index])
+                    {
+                        case 0: Board[i, j] = Tile.Empty; break;
+                        case 255: Board[i, j] = Tile.Barrier; break;
+
+                        default: Board[i, j] = Tile.OtherUser; break;
+                    }
+                index++;
+            }
+
+        int index2 = Array.IndexOf(Location, Location[2], setingCell);
+
+        //
+        int x = (index2 - setingCell) / size;
+        int y = (index2 - setingCell) % size;
+        Board[x, y] = Tile.Target;
+        return Board;
+    }
+
+    // This method is called after the component has finished rendering. 
+    // It retrieves user account information, loads data, and updates the component's state accordingly.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var result = await AuthService.RetrieveUserAccountAsync();
+                if (result.Status != ResultStatus.Success)
+                {
+                    StateHasChanged();
+                    return;
+                }
+
+                _userDataLocal = result.Value!;
+                await LoadDataAsync();
+            }
+            catch
+            {
+
+            }
+            finally
+            {
+                StateHasChanged();
+            }
+        }
+    }
+
+    //  This method loads user data from the server using an HTTP GET request and updates the _registeredUser field accordingly.
+    private async Task LoadDataAsync()
+    {
+        string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"RegisteredUsers/{_userDataLocal.Id}";
+
+        var userResult = await RequestHandler.SendHttpRequestAsync<RegisteredUser, RegisteredUser>(HttpMethod.Get, apiUrl, _userDataLocal);
+        if (userResult.Status == ResultStatus.Success)
+            _registeredUser = userResult.Value;
+
+    }
+
+    // 
+    private void ConfigureAndShowSnackbar(string text, Severity severity = Severity.Warning)
+    {
+        Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+        Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+        Snackbar.Add(text, severity);
+    }
+    public enum Tile
+    {
+        Empty = 0,
+        Me = 1,
+        Barrier = 2,
+        Target = 3,
+        OtherUser = 4
+    }
+}

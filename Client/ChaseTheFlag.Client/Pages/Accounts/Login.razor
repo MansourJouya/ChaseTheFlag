@@ -1,0 +1,158 @@
+﻿@page "/"
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavigationManager
+@inject RequestHandler RequestHandler
+@inject AuthenticationService AuthService
+@inject ISnackbar Snackbar
+
+@if (isShow)
+{
+    <EditForm Model="@user" OnValidSubmit="OnValidSubmit">
+        <DataAnnotationsValidator />
+        <MudGrid>
+            <MudItem xs="12" md="4" />
+            <MudItem xs="12" md="4">
+                <MudCard Elevation="15" Style="position:relative;" Class="py-8 px-4 rounded-lg">
+                    <div style="display: flex; justify-content: center; align-items: center;">
+                        <MudCardMedia Image="images/flag.png" Style="width:150px; height:150px;" />
+                    </div>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Align="Align.Center" Class="mt-2" Typo="Typo.h6">Login to Chase The Flag game</MudText>
+                            <MudText Align="Align.Center"  Class="mt-1" Typo="Typo.body2">Don't have an account? <MudLink Typo="Typo.inherit" Href="/Registry">Registry</MudLink></MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+
+
+                        <MudTextField T="string" Label="User Name" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="user.Username"
+                                      For="@(() => user.Username)"
+                                      MaxLength="50" Counter="50" Immediate Clearable Required />
+
+                        <MudTextField T="string" Label="Password" Margin="Margin.Dense" Class="mt-4"
+                                      @bind-Value="user.Password"
+                                      For="@(() => user.Password)"
+                                      InputType="@PasswordInputType"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@PasswordInputIcon"
+                                      OnAdornmentClick="TogglePasswordVisibility"
+                                      MaxLength="50" Counter="50" Immediate Clearable Required />
+                    </MudCardContent>
+                    <MudCardActions>
+                        <MudButton ButtonType="ButtonType.Submit"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Class="ml-auto">
+                            Login
+                        </MudButton>
+                    </MudCardActions>
+                    <ShowingOverlay IsShowingOverlay="@isShowingOverlay" ColorProgressLinear="Color.Info" Text="Please wait while we review your information." />
+                </MudCard>
+            </MudItem>
+            <MudItem xs="12" md="4" />
+        </MudGrid>
+
+    </EditForm>
+    <SnackbarNotification Text="Incorrect username or password." Severity="Severity.Error" Visible="@isShowNotification" />
+}
+@code {
+    UserDataLocal user = new UserDataLocal();                                    // Creating a new instance of UserDataLocal and initializing its properties
+
+    // {
+    //     Username = "User1",
+    //     Password = "12345678A"
+    // };
+    bool isShow = true;                                                         // Boolean variable to control whether something is being shown
+    private MudTextField<string>? refPassowrd;                                  // Reference to a MudTextField component for password input
+    bool isShowingOverlay = false;                                              // Boolean variable to control whether an overlay is being shown
+    bool isShowNotification = false;                                            // Boolean variable to control whether a notification is being shown
+    private bool isShowPassoword;                                               // Boolean variable to control whether the password is being shown
+    private InputType PasswordInputType = InputType.Password;                   // Input type for the password field, initially set to password for hiding the characters
+    private string PasswordInputIcon = Icons.Material.Filled.VisibilityOff;     // Icon for showing/hiding the password, initially set to the visibility off icon
+
+    // Executes after the component has been rendered, checks if it's the first render, attempts to retrieve user account, and navigates to the home page if successful; otherwise, sets isShow to true.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var result = await AuthService.RetrieveUserAccountAsync();
+                if (result.Status != ResultStatus.Success)
+                {
+                    isShow = true;
+                    StateHasChanged();
+                    return;
+                }
+
+                NavigateToHomePage();
+            }
+            catch
+            {
+                isShow = true;
+            }
+            finally
+            {
+                StateHasChanged();
+            }
+        }
+    }
+
+    // Handles the submission of valid form data, shows loading overlay, authenticates user asynchronously, and navigates to the home page if successful; otherwise, displays an error message.
+    private async Task OnValidSubmit(EditContext context)
+    {
+        isShowingOverlay = true;
+        StateHasChanged();
+        try
+        {
+            string apiUrl = ApiEndpoints.GetApiBaseUrl() + $"RegisteredUsers/authenticate/{user.Username}/{user.Password}";
+            var result = await AuthService.GetUserAsync(apiUrl);
+            if (result.Status != ResultStatus.Success)
+            {
+                ConfigureAndShowSnackbar(result.ErrorMessage, Severity.Error);
+                return;
+            }
+
+            NavigateToHomePage();
+        }
+        catch
+        {
+            ConfigureAndShowSnackbar("خطای رخ داده است، لطفا دوباره تلاش کنید.", Severity.Error);
+        }
+        finally
+        {
+            isShowingOverlay = false;
+            StateHasChanged();
+        }
+    }
+
+    // Navigates to the home page.
+    private void NavigateToHomePage()
+    {
+        NavigationManager.NavigateTo("Home", forceLoad: true);
+    }
+
+    // Configures and shows a snackbar with the provided text and severity.
+    private void ConfigureAndShowSnackbar(string text, Severity severity = Severity.Warning)
+    {
+        Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+        Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+        Snackbar.Add(text, severity);
+    }
+
+    // Toggles password visibility by changing the password input type and icon.
+    private void TogglePasswordVisibility()
+    {
+        isShowPassoword = !isShowPassoword;
+        PasswordInputIcon = isShowPassoword ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff;
+        PasswordInputType = isShowPassoword ? InputType.Text : InputType.Password;
+    }
+
+    // Handles keydown event, focuses on the password field if the "Enter" key is pressed and the username is not empty.
+    protected void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrEmpty(user.Username))
+            refPassowrd!.FocusAsync();
+    }
+}

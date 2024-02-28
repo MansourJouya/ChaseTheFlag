@@ -1,0 +1,159 @@
+﻿@inject RequestHandler RequestHandler
+@inject ISnackbar Snackbar
+
+
+
+<MudDialog @bind-IsVisible="@_isVisible" Options="dialogOptions">
+
+    <TitleContent>
+        <MudCardHeader>
+            <CardHeaderContent>
+                <div style="display: flex; align-items: center; margin-bottom: -25px;">
+                    <MudIcon Icon="@(!isEdit ? Icons.Material.Filled.Add : Icons.Material.Filled.Edit)" Class="mr-2 mt-0" Color="Color.Default" Size="Size.Medium" />
+                    <MudText Typo="Typo.h6" Color="Color.Default" Class="mt-1"> @(isEdit ? "Edit Room" : "Add Room")</MudText>
+                </div>
+            </CardHeaderContent>
+        </MudCardHeader>
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="@Room" OnValidSubmit="OnValidSubmitAsync">
+
+            <DataAnnotationsValidator />
+            <MudCard Elevation="15" Class="mb-5">
+                <MudCardContent>
+                    <MudGrid>
+                        <MudItem xs="12" md="12">
+
+                            <MudTextField Label="Room Name" Margin="Margin.Dense"
+                                          @bind-Value="Room.Name"
+                                          For="@(() => Room.Name)"
+                                          MaxLength="11" Counter="11" Immediate Clearable Required
+                                          HelperText="Example: Game One" />
+
+                            <MudTextField Label="Max Level" Margin="Margin.Dense" Class="mt-4"
+                                          @bind-Value="Room.Level"
+                                          For="@(() => Room.Level)"
+                                          MaxLength="3" Counter="3" Immediate Clearable Required
+                                          Mask="@(new PatternMask("000"))"
+                                          HelperText="Example: 5" />
+
+                            <MudTextField Label="Max Capacity" Margin="Margin.Dense" Class="mt-4"
+                                          @bind-Value="Room.Capacity"
+                                          For="@(() => Room.Capacity)"
+                                          MaxLength="3" Counter="3" Immediate Clearable Required
+                                          Mask="@(new PatternMask("000"))"
+                                          HelperText="Example: 10 people" />
+
+
+
+                            <MudColorPicker Label="Color" Margin="Margin.Dense" Class="mt-4"
+                                            @bind-Text="Room.Color"
+                                            Clearable
+                                            Style="@($"color: {Room.Color};")" />
+                        </MudItem>
+
+
+                    </MudGrid>
+                </MudCardContent>
+
+                <MudCardActions>
+                    <MudButton Class="mb-2 mr-2" ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary">
+                        @(isEdit ? "Edit Room" : "Add Room")
+                    </MudButton>
+
+                </MudCardActions>
+            </MudCard>
+        </EditForm>
+        <ShowingOverlay IsShowingOverlay="@isShowingOverlay" ColorProgressLinear="Color.Info" Text="Please wait while we review your information." />
+
+
+    </DialogContent>
+</MudDialog>
+
+
+
+
+
+@code {
+
+    [Parameter]
+    public EventCallback OnDataUpdated { get; set; }                // Represents a callback that is invoked when data is updated.
+
+    [Parameter]
+    public bool isEdit { get; set; } = false;                       // Indicates whether the component is in edit mode, default is false.
+
+    [Parameter]
+    public Room Room { get; set; } = new();                         // Represents the room data parameter.
+
+    [Parameter]
+    public bool _isVisible { get; set; }                            // Indicates whether the component is visible.
+
+    [Parameter]
+    public int RegisteredRoomId { get; set; }                       // Represents the registered room ID parameter.
+
+    [Parameter]
+    public UserDataLocal UserDataLocal { get; set; } = new();       // Represents the local user data parameter.
+
+
+    Variant Variant = Variant.Outlined;                             // Specifies the variant of the component, default is Variant.Outlined.
+
+    // Indicates whether the overlay is being shown.
+    private bool isShowingOverlay { get; set; }
+
+    // Options for the dialog, including full width, maximum width, close button visibility, and close on escape key press.
+    private DialogOptions dialogOptions = new()
+        {
+            FullWidth = true,
+            MaxWidth = MaxWidth.ExtraSmall,
+            CloseButton = true,
+            CloseOnEscapeKey = true
+        };
+
+    // Handles the submission of valid form data.
+    private async Task OnValidSubmitAsync()
+    {
+        try
+        {
+            isShowingOverlay = true;
+            StateHasChanged();
+            string apiUrl = ApiEndpoints.GetApiBaseUrl() + "RegisteredRooms";
+            if (!isEdit)
+            {
+                var result = await RequestHandler.SendHttpRequestAsync<Room, Room>(HttpMethod.Post, apiUrl, UserDataLocal!, Room);
+                if (result.Status == ResultStatus.Success)
+                {
+                    showMessage($"Room successfully registered.", Severity.Success);
+                    await OnDataUpdated.InvokeAsync();
+                }
+                else
+                    showMessage(result.ErrorMessage, Severity.Error);
+            }
+            else
+            {
+                var result = await RequestHandler.SendHttpRequestAsync<Room, Room>(HttpMethod.Put, apiUrl + $"/{RegisteredRoomId}", UserDataLocal!, Room);
+
+                if (result.Status == ResultStatus.Success)
+                {
+                    showMessage($"Room successfully edited.", Severity.Success);
+                    await OnDataUpdated.InvokeAsync();
+                }
+                else
+                    showMessage(result.ErrorMessage, Severity.Error);
+            }
+        }
+        catch
+        {
+            showMessage("Error, please try again.", Severity.Error);
+        }
+        isShowingOverlay = false;
+        StateHasChanged();
+    }
+
+    // Displays a message using the Snackbar component.
+    private void showMessage(string text, Severity severity = Severity.Warning)
+    {
+        Snackbar.Configuration.PositionClass = Defaults.Classes.Position.BottomEnd;
+        Snackbar.Configuration.SnackbarVariant = Variant.Filled;
+        Snackbar.Add(text, severity);
+    }
+}
